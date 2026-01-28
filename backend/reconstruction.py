@@ -47,30 +47,53 @@ class GaussianSplattingPipeline:
         """
 
         try:
+            # Check if we're in simulation mode
+            implementation = os.getenv("GS_IMPLEMENTATION", "auto")
+            is_simulation = implementation == "simulation"
+
             # Step 1: Prepare images (0-5%)
             yield 2, "Preparing images..."
             await self._prepare_images()
             yield 5, "Images prepared"
 
-            # Step 2: COLMAP feature extraction (5-20%)
-            yield 8, "Extracting features with COLMAP..."
-            await self._run_colmap_feature_extraction()
-            yield 20, "Features extracted"
+            if not is_simulation:
+                # Real COLMAP pipeline
+                # Step 2: COLMAP feature extraction (5-20%)
+                yield 8, "Extracting features with COLMAP..."
+                await self._run_colmap_feature_extraction()
+                yield 20, "Features extracted"
 
-            # Step 3: COLMAP feature matching (20-35%)
-            yield 25, "Matching features..."
-            await self._run_colmap_matching()
-            yield 35, "Features matched"
+                # Step 3: COLMAP feature matching (20-35%)
+                yield 25, "Matching features..."
+                await self._run_colmap_matching()
+                yield 35, "Features matched"
 
-            # Step 4: COLMAP sparse reconstruction (35-50%)
-            yield 40, "Computing camera poses (SfM)..."
-            await self._run_colmap_mapper()
-            yield 50, "Camera poses computed"
+                # Step 4: COLMAP sparse reconstruction (35-50%)
+                yield 40, "Computing camera poses (SfM)..."
+                await self._run_colmap_mapper()
+                yield 50, "Camera poses computed"
 
-            # Step 5: COLMAP undistortion (50-55%)
-            yield 52, "Undistorting images..."
-            await self._run_colmap_undistortion()
-            yield 55, "Images undistorted"
+                # Step 5: COLMAP undistortion (50-55%)
+                yield 52, "Undistorting images..."
+                await self._run_colmap_undistortion()
+                yield 55, "Images undistorted"
+            else:
+                # Simulation: just report progress
+                yield 10, "Simulating feature extraction..."
+                await asyncio.sleep(0.5)
+                yield 20, "Features extracted (simulated)"
+
+                yield 25, "Simulating feature matching..."
+                await asyncio.sleep(0.5)
+                yield 35, "Features matched (simulated)"
+
+                yield 40, "Simulating camera pose computation..."
+                await asyncio.sleep(0.5)
+                yield 50, "Camera poses computed (simulated)"
+
+                yield 52, "Simulating image undistortion..."
+                await asyncio.sleep(0.5)
+                yield 55, "Images undistorted (simulated)"
 
             # Step 6: 3D Gaussian Splatting training (55-95%)
             yield 60, "Training 3D Gaussian Splatting model..."
