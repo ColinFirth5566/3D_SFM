@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { API_ENDPOINTS } from '@/lib/config';
 
 interface ImageUploadProps {
   onUploadComplete: (jobId: string) => void;
@@ -46,7 +47,7 @@ export default function ImageUpload({ onUploadComplete, onError }: ImageUploadPr
     });
 
     try {
-      const response = await fetch('http://localhost:8000/api/upload', {
+      const response = await fetch(API_ENDPOINTS.upload, {
         method: 'POST',
         body: formData,
       });

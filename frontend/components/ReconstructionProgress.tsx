@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { API_ENDPOINTS } from '@/lib/config';
 
 interface ReconstructionProgressProps {
   jobId: string;
@@ -19,7 +20,7 @@ export default function ReconstructionProgress({
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/status/${jobId}`);
+        const response = await fetch(API_ENDPOINTS.status(jobId));
 
         if (!response.ok) {
           throw new Error('Status check failed');
@@ -31,7 +32,7 @@ export default function ReconstructionProgress({
         setStage(data.stage);
 
         if (data.status === 'completed') {
-          onComplete(`http://localhost:8000/api/download/${jobId}`);
+          onComplete(API_ENDPOINTS.download(jobId));
         } else if (data.status === 'failed') {
           onError();
         }
