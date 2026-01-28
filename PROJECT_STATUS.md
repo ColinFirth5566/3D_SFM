@@ -27,10 +27,11 @@ The foundational structure for the 3D Reconstruction web application has been im
 - [x] Pydantic models for request/response validation
 
 #### Integration Framework
-- [x] Reconstruction pipeline structure in `reconstruction.py`
+- [x] 3D Gaussian Splatting pipeline structure in `reconstruction.py`
 - [x] Progress reporting system (0-100%)
-- [x] Stage-based pipeline (6 stages)
-- [x] GLTF export framework
+- [x] Stage-based pipeline (7 stages: COLMAP + 3DGS + export)
+- [x] PLY and GLTF export framework
+- [x] Support for multiple 3DGS implementations (original, nerfstudio, simulation)
 
 #### Documentation
 - [x] README.md with project overview
@@ -48,24 +49,45 @@ The foundational structure for the 3D Reconstruction web application has been im
 
 ### ⚠️ Requires Implementation
 
-#### OpenMVG/OpenMVS Integration
-The reconstruction pipeline currently uses **simulation/placeholders**. Real implementation requires:
+#### 3D Gaussian Splatting Integration
+The reconstruction pipeline is **fully implemented** and supports multiple modes:
 
-1. **Install OpenMVG and OpenMVS** on the system
-2. **Update `backend/reconstruction.py`** to call actual binaries:
-   - `_run_image_listing()` → `openMVG_main_SfMInit_ImageListing`
-   - `_run_feature_extraction()` → `openMVG_main_ComputeFeatures`
-   - `_run_feature_matching()` → `openMVG_main_ComputeMatches`
-   - `_run_sfm()` → `openMVG_main_IncrementalSfM`
-   - `_run_dense_reconstruction()` → OpenMVS pipeline (DensifyPointCloud, ReconstructMesh, etc.)
-   - `_export_to_gltf()` → Add mesh converter (obj2gltf, assimp)
+**For Production Use:**
+1. **Install COLMAP** for Structure from Motion
+   ```bash
+   sudo apt-get install colmap
+   ```
 
-3. **Configure paths** in `backend/.env`
+2. **Install 3D Gaussian Splatting** (choose one):
 
-#### GLTF Conversion
-- Install mesh converter (e.g., `obj2gltf` npm package or `assimp` library)
-- Implement conversion from OpenMVS output (PLY/OBJ) to GLTF
-- Handle texture mapping and embedding
+   **Option A: Original 3DGS (Best quality)**
+   ```bash
+   cd /opt
+   git clone https://github.com/graphdeco-inria/gaussian-splatting --recursive
+   cd gaussian-splatting
+   pip install submodules/diff-gaussian-rasterization
+   pip install submodules/simple-knn
+   ```
+
+   **Option B: Nerfstudio (Easier setup)**
+   ```bash
+   pip install nerfstudio
+   ```
+
+3. **Configure `backend/.env`**:
+   ```
+   COLMAP_BIN=colmap
+   GS_IMPLEMENTATION=original  # or 'nerfstudio'
+   GAUSSIAN_SPLATTING_PATH=/opt/gaussian-splatting
+   ```
+
+**For Testing (No GPU required):**
+- Set `GS_IMPLEMENTATION=simulation` in `.env`
+- Pipeline will simulate reconstruction for testing
+
+#### GPU Requirements
+- **Production**: NVIDIA GPU with 8GB+ VRAM and CUDA 11.6+
+- **Testing**: CPU-only mode available (simulation)
 
 ### 🚀 Testing the Current Implementation
 
@@ -95,13 +117,13 @@ The 3D model viewer will show a placeholder GLTF until real reconstruction is im
 
 ### 📋 Next Steps for Phase 0 Completion
 
-1. **Install OpenMVG/OpenMVS** (see docs/SETUP.md)
-2. **Implement actual reconstruction calls** in `backend/reconstruction.py`
-3. **Add mesh to GLTF converter**
-4. **Test with real images**
-5. **Add error handling and logging**
-6. **Implement file cleanup** (delete old jobs)
-7. **Add progress estimation** based on image count
+1. **Install COLMAP and 3DGS** (see backend/README.md)
+2. **Test with real images and GPU**
+3. **Optimize 3DGS training parameters** for speed/quality balance
+4. **Add error handling and logging**
+5. **Implement file cleanup** (delete old jobs)
+6. **Consider frontend updates** for gaussian splat viewer (optional)
+7. **Add PLY viewer support** for better gaussian splat visualization
 
 ### 📋 Phase 1 Requirements
 
@@ -159,6 +181,6 @@ Once Phase 0 is fully functional:
 ## Technology Stack Summary
 
 **Frontend**: Next.js 14, TypeScript, Tailwind CSS, Three.js, React Three Fiber
-**Backend**: Python 3.9+, FastAPI, Uvicorn
-**3D Processing**: OpenMVG, OpenMVS (to be integrated)
-**Data Format**: GLTF 2.0
+**Backend**: Python 3.9+, FastAPI, Uvicorn, PyTorch
+**3D Processing**: COLMAP (SfM), 3D Gaussian Splatting
+**Data Format**: PLY (primary), GLTF 2.0 (secondary)

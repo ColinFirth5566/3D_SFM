@@ -51,45 +51,107 @@ This guide will help you set up the 3D Reconstruction Web Application.
    - Frontend: http://localhost:3000
    - Backend API docs: http://localhost:8000/docs
 
-## OpenMVG and OpenMVS Installation
+## 3D Gaussian Splatting and COLMAP Installation
 
-The reconstruction pipeline requires OpenMVG and OpenMVS to be installed.
+The reconstruction pipeline uses COLMAP for camera pose estimation and 3D Gaussian Splatting for reconstruction.
 
-### Option 1: Build from Source (Linux/Mac)
+### Prerequisites
 
-**OpenMVG**:
+- **GPU**: NVIDIA GPU with 8GB+ VRAM (for production)
+- **CUDA**: Version 11.6 or higher
+- **Python**: 3.7+
+
+### Step 1: Install COLMAP
+
+**Ubuntu/Debian**:
 ```bash
-git clone --recursive https://github.com/openMVG/openMVG.git
-cd openMVG
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=RELEASE ..
-make -j4
-sudo make install
+sudo apt-get install colmap
 ```
 
-**OpenMVS**:
+**macOS** (Homebrew):
 ```bash
-# Install dependencies (Ubuntu/Debian)
-sudo apt-get install libboost-all-dev libopencv-dev libcgal-dev libeigen3-dev
+brew install colmap
+```
 
-git clone https://github.com/cdcseacave/openMVS.git
-cd openMVS
+**From Source**:
+```bash
+git clone https://github.com/colmap/colmap.git
+cd colmap
 mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j4
-sudo make install
+cmake .. -GNinja
+ninja
+sudo ninja install
 ```
 
-### Option 2: Docker (Recommended for Development)
-
-A Docker setup can be created to bundle OpenMVG and OpenMVS. See `docker-compose.yml`.
-
-### Configuration
-
-After installation, update `backend/.env`:
+Verify installation:
+```bash
+colmap -h
 ```
-OPENMVG_BIN=/usr/local/bin/openMVG
-OPENMVS_BIN=/usr/local/bin/openMVS
+
+### Step 2: Install 3D Gaussian Splatting
+
+**Option A: Original 3DGS (Recommended for production)**
+
+1. Install CUDA and PyTorch:
+```bash
+# Install PyTorch with CUDA support
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+```
+
+2. Clone and install 3DGS:
+```bash
+cd /opt
+sudo git clone https://github.com/graphdeco-inria/gaussian-splatting --recursive
+cd gaussian-splatting
+
+# Install submodules
+pip install submodules/diff-gaussian-rasterization
+pip install submodules/simple-knn
+
+# Install other dependencies
+pip install plyfile tqdm
+```
+
+3. Update `backend/.env`:
+```bash
+COLMAP_BIN=colmap
+GS_IMPLEMENTATION=original
+GAUSSIAN_SPLATTING_PATH=/opt/gaussian-splatting
+```
+
+**Option B: Nerfstudio with Splatfacto (Easier setup)**
+
+```bash
+pip install nerfstudio
+ns-install-cli
+```
+
+Update `backend/.env`:
+```bash
+COLMAP_BIN=colmap
+GS_IMPLEMENTATION=nerfstudio
+```
+
+**Option C: Simulation Mode (No GPU required)**
+
+For testing without GPU or 3DGS installation:
+
+Update `backend/.env`:
+```bash
+GS_IMPLEMENTATION=simulation
+```
+
+### Verify Installation
+
+Check CUDA:
+```bash
+nvcc --version
+nvidia-smi
+```
+
+Check PyTorch CUDA:
+```bash
+python -c "import torch; print(torch.cuda.is_available())"
 ```
 
 ## Testing the Setup

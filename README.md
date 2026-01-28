@@ -18,8 +18,8 @@ A web application for creating 3D models from multiple photos using Structure fr
 
 ### Backend
 - Python with FastAPI
-- OpenMVG for feature extraction and matching
-- OpenMVS for dense reconstruction
+- COLMAP for Structure from Motion (camera poses)
+- 3D Gaussian Splatting for reconstruction
 
 ## Project Structure
 
