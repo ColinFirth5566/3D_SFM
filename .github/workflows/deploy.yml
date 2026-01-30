@@ -41,6 +41,10 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
 
+      - name: Add CNAME file
+        run: |
+          cp frontend/public/CNAME frontend/out/CNAME
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

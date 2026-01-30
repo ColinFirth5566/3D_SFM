@@ -13,12 +13,14 @@ from models import JobStatus, UploadResponse, StatusResponse
 
 app = FastAPI(title="3D Reconstruction API")
 
-# CORS configuration for Next.js and GitHub Pages
+# CORS configuration for Next.js and custom domain
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://colinfirth5566.github.io"
+        "https://colinfirth5566.github.io",
+        "https://yfcosmos.com",
+        "https://www.yfcosmos.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
