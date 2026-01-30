@@ -43,7 +43,7 @@ jobs:
 
       - name: Prepare deployment directory
         run: |
-          mkdir -p deploy
+          mkdir -p deploy/3D_SFM
           cp index.html deploy/index.html
           cp -r frontend/out/* deploy/3D_SFM/
           cp frontend/public/CNAME deploy/CNAME
