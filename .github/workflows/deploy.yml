@@ -45,6 +45,10 @@ jobs:
         run: |
           cp frontend/public/CNAME frontend/out/CNAME
 
+      - name: Copy root landing page
+        run: |
+          cp index.html frontend/out/index.html
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
