@@ -41,18 +41,17 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
 
-      - name: Add CNAME file
+      - name: Prepare deployment directory
         run: |
-          cp frontend/public/CNAME frontend/out/CNAME
-
-      - name: Copy root landing page
-        run: |
-          cp index.html frontend/out/index.html
+          mkdir -p deploy
+          cp index.html deploy/index.html
+          cp -r frontend/out/* deploy/3D_SFM/
+          cp frontend/public/CNAME deploy/CNAME
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./frontend/out
+          path: ./deploy
 
   deploy:
     environment:
