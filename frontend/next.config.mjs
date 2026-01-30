@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
-  // No basePath needed for custom domain
+  basePath: '/3D_SFM',
   images: {
     unoptimized: true,
   },
