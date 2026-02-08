@@ -5,7 +5,7 @@ import { API_ENDPOINTS } from '@/lib/config';
 
 interface ReconstructionProgressProps {
   jobId: string;
-  onComplete: (modelUrl: string) => void;
+  onComplete: (jobId: string) => void;
   onError: () => void;
 }
 
@@ -32,7 +32,7 @@ export default function ReconstructionProgress({
         setStage(data.stage);
 
         if (data.status === 'completed') {
-          onComplete(API_ENDPOINTS.download(jobId));
+          onComplete(jobId);
         } else if (data.status === 'failed') {
           onError();
         }
@@ -103,7 +103,7 @@ export default function ReconstructionProgress({
         </div>
 
         <p className="text-center text-gray-400 mt-8 text-sm">
-          This process may take several minutes depending on the number of images...
+          Processing typically completes in under 5 minutes for 12 images...
         </p>
       </div>
     </div>

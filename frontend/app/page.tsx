@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import ImageUpload from '@/components/ImageUpload';
 import ReconstructionProgress from '@/components/ReconstructionProgress';
-import ModelViewer from '@/components/ModelViewer';
+import GaussianSplatViewer from '@/components/GaussianSplatViewer';
+import { API_ENDPOINTS } from '@/lib/config';
 
 export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
-  const [modelUrl, setModelUrl] = useState<string | null>(null);
+  const [splatUrl, setSplatUrl] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'complete' | 'error'>('idle');
 
   const handleUploadComplete = (newJobId: string) => {
@@ -15,8 +17,9 @@ export default function Home() {
     setStatus('processing');
   };
 
-  const handleReconstructionComplete = (url: string) => {
-    setModelUrl(url);
+  const handleReconstructionComplete = (completedJobId: string) => {
+    setSplatUrl(API_ENDPOINTS.downloadSplat(completedJobId));
+    setDownloadUrl(API_ENDPOINTS.downloadSplat(completedJobId));
     setStatus('complete');
   };
 
@@ -26,7 +29,8 @@ export default function Home() {
 
   const resetApp = () => {
     setJobId(null);
-    setModelUrl(null);
+    setSplatUrl(null);
+    setDownloadUrl(null);
     setStatus('idle');
   };
 
@@ -61,9 +65,9 @@ export default function Home() {
           />
         )}
 
-        {status === 'complete' && modelUrl && (
+        {status === 'complete' && splatUrl && downloadUrl && (
           <div>
-            <ModelViewer modelUrl={modelUrl} />
+            <GaussianSplatViewer splatUrl={splatUrl} downloadUrl={downloadUrl} />
             <div className="text-center mt-8">
               <button
                 onClick={resetApp}

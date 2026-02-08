@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Tuple
 import asyncio
 import json
 import shutil
+from PIL import Image
 
 
 class GaussianSplattingPipeline:
@@ -17,15 +18,26 @@ class GaussianSplattingPipeline:
     3. Export - Convert to web-friendly format (PLY/GLTF)
     """
 
-    def __init__(self, job_id: str, upload_dir: Path, output_dir: Path):
+    def __init__(self, job_id: str, upload_dir: Path, output_dir: Path, fast_mode: bool = True):
         self.job_id = job_id
         self.input_dir = upload_dir / job_id
         self.output_dir = output_dir / job_id
         self.output_dir.mkdir(exist_ok=True)
+        self.fast_mode = fast_mode  # Fast mode for <5 min processing
 
         # Binary paths - configure via environment variables
         self.colmap_bin = os.getenv("COLMAP_BIN", "colmap")
         self.gaussian_splatting_path = os.getenv("GAUSSIAN_SPLATTING_PATH", "/opt/gaussian-splatting")
+
+        # Fast mode settings for <5 min processing with 12 images
+        if self.fast_mode:
+            self.max_image_size = 800  # Downscale to 800px max dimension
+            self.gs_iterations = 2000  # Reduced from 7000
+            self.sift_max_features = 4096  # Fewer features
+        else:
+            self.max_image_size = 1920  # Full HD
+            self.gs_iterations = 7000  # Full quality
+            self.sift_max_features = 8192
 
         # Working directories
         self.colmap_dir = self.output_dir / "colmap"
@@ -129,16 +141,39 @@ class GaussianSplattingPipeline:
         return stdout.decode()
 
     async def _prepare_images(self):
-        """Copy and prepare images for COLMAP"""
+        """Copy, resize, and prepare images for COLMAP"""
         images = sorted(self.input_dir.glob("*.*"))
 
         for img in images:
             if img.suffix.lower() in ['.jpg', '.jpeg', '.png']:
                 dest = self.images_dir / img.name
-                shutil.copy2(img, dest)
+
+                # Resize image for faster processing
+                try:
+                    with Image.open(img) as pil_img:
+                        # Convert to RGB if necessary (handles RGBA, palette, etc.)
+                        if pil_img.mode != 'RGB':
+                            pil_img = pil_img.convert('RGB')
+
+                        # Calculate new size maintaining aspect ratio
+                        width, height = pil_img.size
+                        max_dim = max(width, height)
+
+                        if max_dim > self.max_image_size:
+                            scale = self.max_image_size / max_dim
+                            new_width = int(width * scale)
+                            new_height = int(height * scale)
+                            pil_img = pil_img.resize((new_width, new_height), Image.LANCZOS)
+
+                        # Save as JPEG for faster processing (smaller files)
+                        dest_jpg = self.images_dir / f"{img.stem}.jpg"
+                        pil_img.save(dest_jpg, "JPEG", quality=90)
+                except Exception as e:
+                    # Fallback: just copy the file
+                    shutil.copy2(img, dest)
 
     async def _run_colmap_feature_extraction(self):
-        """Extract features using COLMAP"""
+        """Extract features using COLMAP with optimized settings"""
         database_path = self.colmap_dir / "database.db"
 
         command = [
@@ -149,20 +184,42 @@ class GaussianSplattingPipeline:
             "--ImageReader.single_camera", "1",
             "--ImageReader.camera_model", "OPENCV",
             "--SiftExtraction.use_gpu", "1" if self._check_gpu() else "0",
+            "--SiftExtraction.max_num_features", str(self.sift_max_features),
         ]
+
+        # Add fast mode optimizations
+        if self.fast_mode:
+            command.extend([
+                "--SiftExtraction.first_octave", "0",  # Skip lower octaves for speed
+                "--SiftExtraction.num_threads", "-1",  # Use all CPU cores
+            ])
 
         await self._run_command(command, "COLMAP feature extraction failed")
 
     async def _run_colmap_matching(self):
-        """Match features using COLMAP"""
+        """Match features using COLMAP with optimized settings"""
         database_path = self.colmap_dir / "database.db"
 
-        command = [
-            self.colmap_bin,
-            "exhaustive_matcher",
-            "--database_path", str(database_path),
-            "--SiftMatching.use_gpu", "1" if self._check_gpu() else "0",
-        ]
+        # Count images to decide matching strategy
+        num_images = len(list(self.images_dir.glob("*.jpg"))) + len(list(self.images_dir.glob("*.png")))
+
+        # Use sequential matcher for small sets (faster), exhaustive for larger sets
+        if self.fast_mode and num_images <= 20:
+            command = [
+                self.colmap_bin,
+                "sequential_matcher",
+                "--database_path", str(database_path),
+                "--SiftMatching.use_gpu", "1" if self._check_gpu() else "0",
+                "--SequentialMatching.overlap", "5",  # Match with 5 adjacent images
+                "--SequentialMatching.loop_detection", "0",  # Disable for speed
+            ]
+        else:
+            command = [
+                self.colmap_bin,
+                "exhaustive_matcher",
+                "--database_path", str(database_path),
+                "--SiftMatching.use_gpu", "1" if self._check_gpu() else "0",
+            ]
 
         await self._run_command(command, "COLMAP feature matching failed")
 
@@ -230,7 +287,7 @@ class GaussianSplattingPipeline:
                 yield progress
 
     async def _run_gs_original(self) -> AsyncGenerator[float, None]:
-        """Run original 3DGS implementation"""
+        """Run original 3DGS implementation with optimized settings"""
 
         # Convert COLMAP format to 3DGS input format
         await self._convert_colmap_to_gs_format()
@@ -238,14 +295,23 @@ class GaussianSplattingPipeline:
         # Training command for original 3DGS
         train_script = Path(self.gaussian_splatting_path) / "train.py"
 
+        max_iterations = self.gs_iterations
+
         command = [
             "python",
             str(train_script),
             "-s", str(self.colmap_dir),
             "-m", str(self.gs_output_dir),
-            "--iterations", "7000",  # Reduced for faster processing
-            "--save_iterations", "7000",
+            "--iterations", str(max_iterations),
+            "--save_iterations", str(max_iterations),
         ]
+
+        # Add fast mode optimizations
+        if self.fast_mode:
+            command.extend([
+                "--densify_until_iter", str(min(1500, max_iterations - 100)),
+                "--densification_interval", "200",  # Less frequent densification
+            ])
 
         # Run training with progress monitoring
         process = await asyncio.create_subprocess_exec(
@@ -255,7 +321,6 @@ class GaussianSplattingPipeline:
         )
 
         iteration = 0
-        max_iterations = 7000
 
         async for line in process.stdout:
             line_str = line.decode().strip()
@@ -297,13 +362,13 @@ class GaussianSplattingPipeline:
 
         await self._run_command(command, "Nerfstudio data processing failed")
 
-        # Train with splatfacto
+        # Train with splatfacto using optimized iteration count
         command = [
             "ns-train",
             "splatfacto",
             "--data", str(ns_data_dir),
             "--output-dir", str(self.gs_output_dir),
-            "--max-num-iterations", "7000",
+            "--max-num-iterations", str(self.gs_iterations),
         ]
 
         # Monitor training progress
@@ -351,8 +416,12 @@ class GaussianSplattingPipeline:
         ply_files = list(self.gs_output_dir.rglob("point_cloud.ply"))
 
         if not ply_files:
-            # Try iteration-specific files
-            ply_files = list(self.gs_output_dir.rglob("iteration_7000/point_cloud.ply"))
+            # Try iteration-specific files with current iteration setting
+            ply_files = list(self.gs_output_dir.rglob(f"iteration_{self.gs_iterations}/point_cloud.ply"))
+
+        if not ply_files:
+            # Fallback: try any point_cloud directory
+            ply_files = list(self.gs_output_dir.rglob("point_cloud/iteration_*/point_cloud.ply"))
 
         if ply_files:
             # Copy PLY to output directory

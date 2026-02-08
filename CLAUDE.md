@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a 3D Structure from Motion (SFM) project repository. The codebase is currently empty or in its initial state.
+This is a 3D Structure from Motion (SFM) project repository. 
 
 ## Project Requirements
 
@@ -21,16 +21,16 @@ For Phase 0 development:
 
 1.The website will be built using Next.js.
 2.The 3D model will be built using Three.js.
-3.The reconstruction will be built using 3D Gaussian Splatting (3DGS), with COLMAP for camera pose estimation. Python backend handles the pipeline.
+3.The reconstruction will be built using 3D Gaussian Splatting (3DGS) for texturing, with COLMAP CLI for camera pose estimation, Open3D Python API for mesh reconstruction. Python backend handles the pipeline.
 4.python returns the reconstruction result to the next.js frontend by rest api.
 
 For phase 1 development:
 
-1. Add database to store user information and uploaded image information and 3D model information.
+1. Add database to store user information and uploaded image information and 3D model information. (I prefer to use PostgreSQL in cloudflare)
 2. Add user authentication and authorization.
+3. Show result here : https://yfcosmos.com/3D_SFM/
 
 I will keep updating this file as the project progresses.
-
 
 ## Architecture
 
@@ -49,7 +49,7 @@ The project is split into two main components:
 
 ### Backend (`/backend`)
 - **Framework**: FastAPI (Python)
-- **Reconstruction**: 3D Gaussian Splatting with COLMAP
+- **Reconstruction**: 3D Gaussian Splatting with Open3D and COLMAP CLI for camera pose estimation.
 - **Key Files**:
   - `main.py` - FastAPI application with REST endpoints and CORS configuration
   - `models.py` - Pydantic models for request/response validation
@@ -68,22 +68,29 @@ The project is split into two main components:
 
 ### Reconstruction Pipeline (reconstruction.py)
 The 3D Gaussian Splatting pipeline with the following stages:
-1. **Image Preparation** (0-5%) - Copy and organize input images
-2. **COLMAP Feature Extraction** (5-20%) - SIFT feature detection
-3. **COLMAP Feature Matching** (20-35%) - Match features across images
+1. **Image Preparation** (0-5%) - Resize and optimize input images (800px max in fast mode)
+2. **COLMAP Feature Extraction** (5-20%) - SIFT feature detection (4096 features in fast mode)
+3. **COLMAP Feature Matching** (20-35%) - Sequential matching for <=20 images (faster than exhaustive)
 4. **COLMAP Mapper** (35-50%) - Structure from Motion, camera pose estimation
 5. **COLMAP Undistortion** (50-55%) - Undistort images for training
-6. **3DGS Training** (55-95%) - Train gaussian splat representation
-7. **Model Export** (95-100%) - Export to PLY/GLTF format
+6. **3DGS Training** (55-95%) - Train gaussian splat representation (2000 iterations in fast mode)
+7. **Model Export** (95-100%) - Export to PLY format for web viewer
+
+### Speed Optimizations (Fast Mode)
+The pipeline includes a fast mode enabled by default for <5 minute processing with 12 images:
+- **Image Resizing**: Downscales images to 800px max dimension
+- **Reduced SIFT Features**: 4096 features instead of 8192
+- **Sequential Matching**: Uses sequential matcher instead of exhaustive for <=20 images
+- **Reduced 3DGS Iterations**: 2000 iterations instead of 7000
+- **Optimized Densification**: Less frequent densification intervals
 
 ## Development Commands
 
 ### Frontend Setup
-```bash
-cd frontend
-npm install
-npm run dev  # Starts on http://localhost:3000
-```
+###
+Please run at the funning website : 
+# https://yfcosmos.com/3D_SFM/
+###
 
 ### Backend Setup
 ```bash
@@ -182,6 +189,8 @@ GS_IMPLEMENTATION=simulation
 - API uses CORS to allow frontend (localhost:3000) to access backend (localhost:8000)
 - Jobs are stored in-memory; implement database for production (Phase 1)
 - Uploaded files and outputs are not cleaned up automatically; add cleanup logic
-- 3DGS training requires 10-30 minutes with GPU (depending on image count and resolution)
+- Fast mode processing: ~3-5 minutes for 12 images with GPU
+- Quality mode (fast_mode=False): 10-30 minutes for full resolution
 - For optimal results, ensure images have 70%+ overlap between adjacent views
 - COLMAP handles camera pose estimation; 3DGS handles the reconstruction
+- Frontend uses @mkkellogg/gaussian-splats-3d for native 3DGS PLY rendering
