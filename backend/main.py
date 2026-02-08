@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -141,6 +144,7 @@ async def download_model(job_id: str):
     )
 
 
+@app.head("/api/download/{job_id}/splat")
 @app.get("/api/download/{job_id}/splat")
 async def download_splat(job_id: str):
     """Download raw PLY gaussian splat file for 3D viewer"""

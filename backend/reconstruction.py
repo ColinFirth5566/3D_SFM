@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import os
 from pathlib import Path
 from typing import AsyncGenerator, Tuple
@@ -183,7 +184,7 @@ class GaussianSplattingPipeline:
             "--image_path", str(self.images_dir),
             "--ImageReader.single_camera", "1",
             "--ImageReader.camera_model", "OPENCV",
-            "--SiftExtraction.use_gpu", "1" if self._check_gpu() else "0",
+            "--FeatureExtraction.use_gpu", "1" if self._check_gpu() else "0",
             "--SiftExtraction.max_num_features", str(self.sift_max_features),
         ]
 
@@ -191,7 +192,7 @@ class GaussianSplattingPipeline:
         if self.fast_mode:
             command.extend([
                 "--SiftExtraction.first_octave", "0",  # Skip lower octaves for speed
-                "--SiftExtraction.num_threads", "-1",  # Use all CPU cores
+                "--FeatureExtraction.num_threads", "-1",  # Use all CPU cores
             ])
 
         await self._run_command(command, "COLMAP feature extraction failed")
@@ -209,7 +210,7 @@ class GaussianSplattingPipeline:
                 self.colmap_bin,
                 "sequential_matcher",
                 "--database_path", str(database_path),
-                "--SiftMatching.use_gpu", "1" if self._check_gpu() else "0",
+                "--FeatureMatching.use_gpu", "1" if self._check_gpu() else "0",
                 "--SequentialMatching.overlap", "5",  # Match with 5 adjacent images
                 "--SequentialMatching.loop_detection", "0",  # Disable for speed
             ]
@@ -218,7 +219,7 @@ class GaussianSplattingPipeline:
                 self.colmap_bin,
                 "exhaustive_matcher",
                 "--database_path", str(database_path),
-                "--SiftMatching.use_gpu", "1" if self._check_gpu() else "0",
+                "--FeatureMatching.use_gpu", "1" if self._check_gpu() else "0",
             ]
 
         await self._run_command(command, "COLMAP feature matching failed")
@@ -290,20 +291,24 @@ class GaussianSplattingPipeline:
         """Run original 3DGS implementation with optimized settings"""
 
         # Convert COLMAP format to 3DGS input format
+        print(f"[3DGS] Starting _run_gs_original")
         await self._convert_colmap_to_gs_format()
 
         # Training command for original 3DGS
         train_script = Path(self.gaussian_splatting_path) / "train.py"
+        print(f"[3DGS] train_script={train_script}, exists={train_script.exists()}")
 
         max_iterations = self.gs_iterations
 
         command = [
-            "python",
+            sys.executable,
             str(train_script),
-            "-s", str(self.colmap_dir),
-            "-m", str(self.gs_output_dir),
+            "--source_path", str(self.distorted_dir),
+            "--model_path", str(self.gs_output_dir),
             "--iterations", str(max_iterations),
             "--save_iterations", str(max_iterations),
+            "--quiet",
+            "--disable_viewer",
         ]
 
         # Add fast mode optimizations
@@ -314,6 +319,7 @@ class GaussianSplattingPipeline:
             ])
 
         # Run training with progress monitoring
+        print(f"[3DGS] Running command: {' '.join(command)}")
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
@@ -321,27 +327,38 @@ class GaussianSplattingPipeline:
         )
 
         iteration = 0
+        output_lines = []
 
         async for line in process.stdout:
             line_str = line.decode().strip()
+            output_lines.append(line_str)
 
-            # Parse iteration from output
-            if "Iteration" in line_str:
+            # Parse iteration from training progress output
+            if "Training progress" in line_str or "Iteration" in line_str:
                 try:
-                    parts = line_str.split()
-                    for i, part in enumerate(parts):
-                        if part == "Iteration":
-                            iteration = int(parts[i + 1])
-                            progress = (iteration / max_iterations) * 100
-                            yield progress
-                            break
+                    # Parse percentage from tqdm-style output
+                    if "%" in line_str:
+                        pct_str = line_str.split("%")[0].split()[-1]
+                        pct = float(pct_str)
+                        yield pct
+                    else:
+                        parts = line_str.split()
+                        for i, part in enumerate(parts):
+                            if part == "Iteration":
+                                iteration = int(parts[i + 1])
+                                progress = (iteration / max_iterations) * 100
+                                yield progress
+                                break
                 except:
                     pass
 
         await process.wait()
+        print(f"[3DGS] Training process exited with code {process.returncode}")
+        print(f"[3DGS] Last output lines: {output_lines[-5:] if output_lines else 'NONE'}")
 
         if process.returncode != 0:
-            raise Exception("3DGS training failed")
+            error_output = "\n".join(output_lines[-20:])
+            raise Exception(f"3DGS training failed (exit code {process.returncode}): {error_output}")
 
         yield 100.0
 
@@ -398,16 +415,25 @@ class GaussianSplattingPipeline:
             yield progress
 
     async def _convert_colmap_to_gs_format(self):
-        """Convert COLMAP output to 3DGS input format"""
-        # Create images symlink for 3DGS
-        gs_images = self.colmap_dir / "images"
-        if not gs_images.exists():
-            gs_images.symlink_to(self.distorted_dir / "images")
+        """Convert COLMAP undistorted output to 3DGS input format.
 
-        # Copy sparse reconstruction
-        gs_sparse = self.colmap_dir / "sparse" / "0"
-        if not (self.colmap_dir / "sparse").exists():
-            shutil.copytree(self.sparse_dir, gs_sparse)
+        3DGS expects: source_path/images/ and source_path/sparse/0/
+        The undistorter outputs: distorted/images/ and distorted/sparse/
+        So we need to move sparse files into a 0/ subdirectory.
+        """
+        print(f"[3DGS] Converting COLMAP format. distorted_dir={self.distorted_dir}")
+        # Create sparse/0/ subdirectory that 3DGS expects
+        gs_sparse_0 = self.distorted_dir / "sparse" / "0"
+        if not gs_sparse_0.exists():
+            sparse_dir = self.distorted_dir / "sparse"
+            print(f"[3DGS] sparse_dir exists: {sparse_dir.exists()}, contents: {list(sparse_dir.iterdir()) if sparse_dir.exists() else 'N/A'}")
+            if sparse_dir.exists():
+                gs_sparse_0.mkdir(parents=True, exist_ok=True)
+                for f in sparse_dir.iterdir():
+                    if f.is_file():
+                        print(f"[3DGS] Moving {f.name} to sparse/0/")
+                        shutil.move(str(f), str(gs_sparse_0 / f.name))
+        print(f"[3DGS] sparse/0 exists: {gs_sparse_0.exists()}, contents: {list(gs_sparse_0.iterdir()) if gs_sparse_0.exists() else 'N/A'}")
 
     async def _export_model(self):
         """Export the trained model to web-friendly format"""
