@@ -41,17 +41,10 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
 
-      - name: Prepare deployment directory
-        run: |
-          mkdir -p deploy/3D_SFM
-          cp index.html deploy/index.html
-          cp -r frontend/out/* deploy/3D_SFM/
-          cp frontend/public/CNAME deploy/CNAME
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./deploy
+          path: ./frontend/out
 
   deploy:
     environment:
