@@ -23,8 +23,9 @@ app.add_middleware(
         "http://localhost:3000",
         "https://colinfirth5566.github.io",
         "https://yfcosmos.com",
-        "https://www.yfcosmos.com"
+        "https://www.yfcosmos.com",
     ],
+    allow_origin_regex=r"https://.*\.ngrok-free\.app",  # Allow ngrok tunnels
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
