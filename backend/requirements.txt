@@ -6,13 +6,4 @@ Pillow==11.0.0
 numpy==2.2.0
 pydantic==2.10.0
 python-dotenv==1.0.1
-
-# 3DGS and related dependencies
-torch>=2.0.0
-torchvision>=0.15.0
-plyfile==1.0.3
-tqdm==4.66.5
-
-# Optional: For advanced features
-# trimesh==4.5.2  # For mesh processing
-# pygltflib==1.16.2  # For GLTF conversion
+trimesh==4.5.2

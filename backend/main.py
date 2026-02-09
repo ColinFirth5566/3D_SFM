@@ -50,10 +50,10 @@ async def root():
 async def upload_images(files: List[UploadFile] = File(...)):
     """Upload images for 3D reconstruction"""
 
-    if len(files) < 10 or len(files) > 20:
+    if len(files) < 3 or len(files) > 20:
         raise HTTPException(
             status_code=400,
-            detail="Please upload between 10 and 20 images"
+            detail="Please upload between 3 and 20 images"
         )
 
     # Validate file types
@@ -120,7 +120,7 @@ async def get_status(job_id: str):
 
 @app.get("/api/download/{job_id}")
 async def download_model(job_id: str):
-    """Download reconstructed 3D model (GLTF)"""
+    """Download reconstructed 3D model (GLB)"""
 
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -140,15 +140,15 @@ async def download_model(job_id: str):
 
     return FileResponse(
         output_file,
-        media_type="model/gltf+json",
-        filename=f"reconstruction_{job_id}.gltf"
+        media_type="model/gltf-binary",
+        filename=f"reconstruction_{job_id}.glb"
     )
 
 
 @app.head("/api/download/{job_id}/ply")
 @app.get("/api/download/{job_id}/ply")
-async def download_standard_ply(job_id: str):
-    """Download MeshLab-compatible PLY file (standard x,y,z,r,g,b)"""
+async def download_ply(job_id: str):
+    """Download mesh PLY file"""
 
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -161,10 +161,10 @@ async def download_standard_ply(job_id: str):
             detail=f"Job is not completed. Current status: {job['status']}"
         )
 
-    ply_file = OUTPUT_DIR / job_id / "model_meshlab.ply"
+    ply_file = OUTPUT_DIR / job_id / "model.ply"
 
     if not ply_file.exists():
-        raise HTTPException(status_code=404, detail="Standard PLY file not found")
+        raise HTTPException(status_code=404, detail="PLY file not found")
 
     return FileResponse(
         str(ply_file),
@@ -173,10 +173,10 @@ async def download_standard_ply(job_id: str):
     )
 
 
-@app.head("/api/download/{job_id}/splat")
-@app.get("/api/download/{job_id}/splat")
-async def download_splat(job_id: str):
-    """Download raw PLY gaussian splat file for 3D viewer"""
+@app.head("/api/download/{job_id}/glb")
+@app.get("/api/download/{job_id}/glb")
+async def download_glb(job_id: str):
+    """Download GLB model file for 3D viewer"""
 
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -189,16 +189,15 @@ async def download_splat(job_id: str):
             detail=f"Job is not completed. Current status: {job['status']}"
         )
 
-    # Look for PLY file
-    ply_file = OUTPUT_DIR / job_id / "model.ply"
+    glb_file = OUTPUT_DIR / job_id / "model.glb"
 
-    if not ply_file.exists():
-        raise HTTPException(status_code=404, detail="Splat PLY file not found")
+    if not glb_file.exists():
+        raise HTTPException(status_code=404, detail="GLB file not found")
 
     return FileResponse(
-        str(ply_file),
-        media_type="application/octet-stream",
-        filename=f"reconstruction_{job_id}.ply"
+        str(glb_file),
+        media_type="model/gltf-binary",
+        filename=f"reconstruction_{job_id}.glb"
     )
 
 
@@ -210,7 +209,6 @@ async def run_reconstruction(job_id: str):
         job["status"] = "processing"
         job["stage"] = "Initializing..."
 
-        # Use fast_mode for <5 min processing
         pipeline = ReconstructionPipeline(job_id, UPLOAD_DIR, OUTPUT_DIR, fast_mode=True)
 
         # Run reconstruction with progress updates
@@ -219,7 +217,7 @@ async def run_reconstruction(job_id: str):
             job["stage"] = stage
 
         # Get output file
-        output_file = OUTPUT_DIR / job_id / "model.gltf"
+        output_file = OUTPUT_DIR / job_id / "model.glb"
 
         if output_file.exists():
             job["status"] = "completed"

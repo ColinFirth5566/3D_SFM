@@ -82,7 +82,7 @@ export default function ReconstructionProgress({
           </div>
         </div>
 
-        {/* Stage descriptions matching MVS-enhanced pipeline */}
+        {/* Stage descriptions matching mesh pipeline */}
         <div className="space-y-3 text-sm text-gray-300">
           <div className={`flex items-center ${progress >= 5 ? 'text-white' : ''}`}>
             <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 5 ? 'bg-green-500' : progress >= 0 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
@@ -92,16 +92,16 @@ export default function ReconstructionProgress({
             <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 35 ? 'bg-green-500' : progress >= 25 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
             <span>Structure from Motion (camera poses)</span>
           </div>
-          <div className={`flex items-center ${progress >= 38 ? 'text-white' : ''}`}>
-            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 60 ? 'bg-green-500' : progress >= 38 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+          <div className={`flex items-center ${progress >= 40 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 75 ? 'bg-green-500' : progress >= 40 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
             <span>Multi-View Stereo dense reconstruction</span>
           </div>
-          <div className={`flex items-center ${progress >= 63 ? 'text-white' : ''}`}>
-            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 95 ? 'bg-green-500' : progress >= 63 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
-            <span>3D Gaussian Splatting training</span>
+          <div className={`flex items-center ${progress >= 75 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 85 ? 'bg-green-500' : progress >= 75 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+            <span>Mesh generation (Poisson surface)</span>
           </div>
-          <div className={`flex items-center ${progress >= 95 ? 'text-white' : ''}`}>
-            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 100 ? 'bg-green-500' : progress >= 95 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+          <div className={`flex items-center ${progress >= 85 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 100 ? 'bg-green-500' : progress >= 85 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
             <span>Model export</span>
           </div>
         </div>

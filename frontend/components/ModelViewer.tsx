@@ -1,42 +1,81 @@
 'use client';
 
-import { Suspense, useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, useGLTF, PerspectiveCamera, Environment } from '@react-three/drei';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
+import { OrbitControls, useGLTF, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 
 interface ModelProps {
   url: string;
+  onLoaded?: (info: { vertices: number; faces: number }) => void;
 }
 
-function Model({ url }: ModelProps) {
+function Model({ url, onLoaded }: ModelProps) {
   const { scene } = useGLTF(url);
-  const modelRef = useRef<THREE.Group>(null);
+  const { camera } = useThree();
+  const groupRef = useRef<THREE.Group>(null);
+  const [centered, setCentered] = useState(false);
 
-  // Center and scale the model
-  useFrame(() => {
-    if (modelRef.current) {
-      const box = new THREE.Box3().setFromObject(modelRef.current);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const scale = 5 / maxDim;
+  // Enable vertex colors on all mesh materials and gather stats
+  useEffect(() => {
+    let totalVertices = 0;
+    let totalFaces = 0;
 
-      modelRef.current.scale.setScalar(scale);
-      modelRef.current.position.sub(center.multiplyScalar(scale));
-    }
-  });
+    scene.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        totalVertices += mesh.geometry.attributes.position?.count ?? 0;
+        totalFaces += mesh.geometry.index
+          ? mesh.geometry.index.count / 3
+          : (mesh.geometry.attributes.position?.count ?? 0) / 3;
 
-  return <primitive ref={modelRef} object={scene} />;
+        // Enable vertex colors if the geometry has them
+        if (mesh.geometry.attributes.color) {
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+          mat.vertexColors = true;
+          mat.needsUpdate = true;
+        }
+      }
+    });
+
+    onLoaded?.({ vertices: Math.round(totalVertices), faces: Math.round(totalFaces) });
+  }, [scene, onLoaded]);
+
+  // Auto-center and scale the model once
+  useEffect(() => {
+    if (centered) return;
+    const box = new THREE.Box3().setFromObject(scene);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+
+    if (maxDim === 0) return;
+
+    const scale = 5 / maxDim;
+    scene.scale.setScalar(scale);
+    scene.position.copy(center.multiplyScalar(-scale));
+
+    // Position camera
+    const cam = camera as THREE.PerspectiveCamera;
+    cam.position.set(6, 4, 6);
+    cam.lookAt(0, 0, 0);
+
+    setCentered(true);
+  }, [scene, camera, centered]);
+
+  return <primitive ref={groupRef} object={scene} />;
 }
 
 interface ModelViewerProps {
   modelUrl: string;
+  downloadUrl: string;
 }
 
-export default function ModelViewer({ modelUrl }: ModelViewerProps) {
+export default function ModelViewer({ modelUrl, downloadUrl }: ModelViewerProps) {
+  const [info, setInfo] = useState<{ vertices: number; faces: number } | null>(null);
+
   const handleDownload = () => {
-    window.open(modelUrl, '_blank');
+    window.open(downloadUrl, '_blank');
   };
 
   return (
@@ -49,32 +88,38 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
         {/* 3D Viewer */}
         <div className="relative w-full h-[600px] bg-gray-900 rounded-xl overflow-hidden mb-6">
           <Canvas>
-            <PerspectiveCamera makeDefault position={[0, 0, 10]} />
-            <ambientLight intensity={0.5} />
+            <PerspectiveCamera makeDefault position={[6, 4, 6]} />
+            <ambientLight intensity={0.6} />
             <directionalLight position={[10, 10, 5]} intensity={1} />
-            <directionalLight position={[-10, -10, -5]} intensity={0.5} />
+            <directionalLight position={[-10, -10, -5]} intensity={0.4} />
 
             <Suspense fallback={null}>
-              <Model url={modelUrl} />
-              <Environment preset="studio" />
+              <Model url={modelUrl} onLoaded={setInfo} />
             </Suspense>
 
             <OrbitControls
               enableDamping
               dampingFactor={0.05}
               rotateSpeed={0.5}
-              minDistance={2}
-              maxDistance={20}
+              minDistance={1}
+              maxDistance={30}
             />
-            <gridHelper args={[20, 20]} />
+            <gridHelper args={[20, 20, '#444444', '#333333']} />
           </Canvas>
+
+          {/* Stats */}
+          {info && (
+            <div className="absolute top-4 right-4 bg-black/70 text-white px-3 py-1 rounded text-sm">
+              {info.vertices.toLocaleString()} vertices &middot; {info.faces.toLocaleString()} faces
+            </div>
+          )}
 
           {/* Controls hint */}
           <div className="absolute bottom-4 left-4 bg-black/70 text-white px-4 py-2 rounded-lg text-sm">
             <p className="font-semibold mb-1">Controls:</p>
-            <p>🖱️ Left click + drag: Rotate</p>
-            <p>🖱️ Right click + drag: Pan</p>
-            <p>🔄 Scroll: Zoom</p>
+            <p>Left click + drag: Rotate</p>
+            <p>Right click + drag: Pan</p>
+            <p>Scroll: Zoom</p>
           </div>
         </div>
 
@@ -84,7 +129,7 @@ export default function ModelViewer({ modelUrl }: ModelViewerProps) {
             onClick={handleDownload}
             className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white font-bold py-4 px-12 rounded-lg text-lg transition duration-200 shadow-lg"
           >
-            ⬇️ Download GLTF Model
+            Download PLY Model
           </button>
         </div>
       </div>

@@ -15,6 +15,6 @@ export const API_ENDPOINTS = {
   upload: `${API_URL}/api/upload`,
   status: (jobId: string) => `${API_URL}/api/status/${jobId}`,
   download: (jobId: string) => `${API_URL}/api/download/${jobId}`,
-  downloadSplat: (jobId: string) => `${API_URL}/api/download/${jobId}/splat`,
+  downloadGlb: (jobId: string) => `${API_URL}/api/download/${jobId}/glb`,
   downloadPly: (jobId: string) => `${API_URL}/api/download/${jobId}/ply`,
 };
