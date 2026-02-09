@@ -1,11 +1,14 @@
 import subprocess
 import sys
 import os
+import struct
 from pathlib import Path
 from typing import AsyncGenerator, Tuple
 import asyncio
 import json
 import shutil
+import numpy as np
+from plyfile import PlyData, PlyElement
 from PIL import Image
 
 
@@ -30,11 +33,11 @@ class GaussianSplattingPipeline:
         self.colmap_bin = os.getenv("COLMAP_BIN", "colmap")
         self.gaussian_splatting_path = os.getenv("GAUSSIAN_SPLATTING_PATH", "/opt/gaussian-splatting")
 
-        # Fast mode settings for <5 min processing with 12 images
+        # Fast mode settings — target <5 min total for 12 images with MVS
         if self.fast_mode:
-            self.max_image_size = 800  # Downscale to 800px max dimension
-            self.gs_iterations = 2000  # Reduced from 7000
-            self.sift_max_features = 4096  # Fewer features
+            self.max_image_size = 1000  # Good quality, fast PatchMatchStereo
+            self.gs_iterations = 5000  # Dense MVS init converges faster
+            self.sift_max_features = 8192  # Full features for better matching
         else:
             self.max_image_size = 1920  # Full HD
             self.gs_iterations = 7000  # Full quality
@@ -71,48 +74,67 @@ class GaussianSplattingPipeline:
 
             if not is_simulation:
                 # Real COLMAP pipeline
-                # Step 2: COLMAP feature extraction (5-20%)
+                # Step 2: COLMAP feature extraction (5-15%)
                 yield 8, "Extracting features with COLMAP..."
                 await self._run_colmap_feature_extraction()
-                yield 20, "Features extracted"
+                yield 15, "Features extracted"
 
-                # Step 3: COLMAP feature matching (20-35%)
-                yield 25, "Matching features..."
+                # Step 3: COLMAP feature matching (15-25%)
+                yield 18, "Matching features..."
                 await self._run_colmap_matching()
-                yield 35, "Features matched"
+                yield 25, "Features matched"
 
-                # Step 4: COLMAP sparse reconstruction (35-50%)
-                yield 40, "Computing camera poses (SfM)..."
+                # Step 4: COLMAP sparse reconstruction (25-35%)
+                yield 28, "Computing camera poses (SfM)..."
                 await self._run_colmap_mapper()
-                yield 50, "Camera poses computed"
+                yield 35, "Camera poses computed"
 
-                # Step 5: COLMAP undistortion (50-55%)
-                yield 52, "Undistorting images..."
+                # Step 5: COLMAP undistortion (35-38%)
+                yield 36, "Undistorting images..."
                 await self._run_colmap_undistortion()
-                yield 55, "Images undistorted"
+                yield 38, "Images undistorted"
+
+                # Step 6: MVS dense reconstruction (38-60%)
+                yield 40, "Computing dense depth maps (PatchMatch MVS)..."
+                await self._run_colmap_patch_match_stereo()
+                yield 55, "Dense depth maps computed"
+
+                yield 56, "Fusing dense point cloud..."
+                fused_ply = await self._run_colmap_stereo_fusion()
+                yield 60, "Dense point cloud fused"
+
+                # Step 7: Prepare dense initialization for 3DGS (60-63%)
+                yield 61, "Preparing dense initialization..."
+                await self._convert_colmap_to_gs_format()
+                num_dense = self._replace_sparse_with_dense(fused_ply, max_points=50000)
+                yield 63, f"Dense initialization ready ({num_dense} points)"
             else:
                 # Simulation: just report progress
                 yield 10, "Simulating feature extraction..."
                 await asyncio.sleep(0.5)
-                yield 20, "Features extracted (simulated)"
+                yield 15, "Features extracted (simulated)"
 
-                yield 25, "Simulating feature matching..."
+                yield 18, "Simulating feature matching..."
                 await asyncio.sleep(0.5)
-                yield 35, "Features matched (simulated)"
+                yield 25, "Features matched (simulated)"
 
-                yield 40, "Simulating camera pose computation..."
+                yield 28, "Simulating camera pose computation..."
                 await asyncio.sleep(0.5)
-                yield 50, "Camera poses computed (simulated)"
+                yield 35, "Camera poses computed (simulated)"
 
-                yield 52, "Simulating image undistortion..."
-                await asyncio.sleep(0.5)
-                yield 55, "Images undistorted (simulated)"
+                yield 36, "Simulating image undistortion..."
+                await asyncio.sleep(0.3)
+                yield 38, "Images undistorted (simulated)"
 
-            # Step 6: 3D Gaussian Splatting training (55-95%)
-            yield 60, "Training 3D Gaussian Splatting model..."
+                yield 40, "Simulating dense reconstruction..."
+                await asyncio.sleep(1.0)
+                yield 63, "Dense reconstruction simulated"
+
+            # Step 8: 3D Gaussian Splatting training (63-95%)
+            yield 65, "Training 3D Gaussian Splatting model..."
             async for progress in self._run_gaussian_splatting():
-                # Map 0-100% of training to 55-95% overall
-                overall_progress = 55 + int(progress * 0.4)
+                # Map 0-100% of training to 63-95% overall
+                overall_progress = 63 + int(progress * 0.32)
                 yield overall_progress, f"Training gaussians... ({int(progress)}%)"
             yield 95, "Gaussian splatting complete"
 
@@ -188,12 +210,10 @@ class GaussianSplattingPipeline:
             "--SiftExtraction.max_num_features", str(self.sift_max_features),
         ]
 
-        # Add fast mode optimizations
-        if self.fast_mode:
-            command.extend([
-                "--SiftExtraction.first_octave", "0",  # Skip lower octaves for speed
-                "--FeatureExtraction.num_threads", "-1",  # Use all CPU cores
-            ])
+        # Use all CPU cores for feature extraction
+        command.extend([
+            "--FeatureExtraction.num_threads", "-1",
+        ])
 
         await self._run_command(command, "COLMAP feature extraction failed")
 
@@ -201,26 +221,13 @@ class GaussianSplattingPipeline:
         """Match features using COLMAP with optimized settings"""
         database_path = self.colmap_dir / "database.db"
 
-        # Count images to decide matching strategy
-        num_images = len(list(self.images_dir.glob("*.jpg"))) + len(list(self.images_dir.glob("*.png")))
-
-        # Use sequential matcher for small sets (faster), exhaustive for larger sets
-        if self.fast_mode and num_images <= 20:
-            command = [
-                self.colmap_bin,
-                "sequential_matcher",
-                "--database_path", str(database_path),
-                "--FeatureMatching.use_gpu", "1" if self._check_gpu() else "0",
-                "--SequentialMatching.overlap", "5",  # Match with 5 adjacent images
-                "--SequentialMatching.loop_detection", "0",  # Disable for speed
-            ]
-        else:
-            command = [
-                self.colmap_bin,
-                "exhaustive_matcher",
-                "--database_path", str(database_path),
-                "--FeatureMatching.use_gpu", "1" if self._check_gpu() else "0",
-            ]
+        # Always use exhaustive matcher — images may not be in capture order
+        command = [
+            self.colmap_bin,
+            "exhaustive_matcher",
+            "--database_path", str(database_path),
+            "--FeatureMatching.use_gpu", "1" if self._check_gpu() else "0",
+        ]
 
         await self._run_command(command, "COLMAP feature matching failed")
 
@@ -250,6 +257,51 @@ class GaussianSplattingPipeline:
         ]
 
         await self._run_command(command, "COLMAP undistortion failed")
+
+    async def _run_colmap_patch_match_stereo(self):
+        """Run COLMAP PatchMatchStereo to compute dense depth maps"""
+        command = [
+            self.colmap_bin,
+            "patch_match_stereo",
+            "--workspace_path", str(self.distorted_dir),
+            "--workspace_format", "COLMAP",
+            "--PatchMatchStereo.max_image_size", str(self.max_image_size),
+            "--PatchMatchStereo.gpu_index", "0",
+            "--PatchMatchStereo.geom_consistency", "true",
+        ]
+
+        if self.fast_mode:
+            command.extend([
+                "--PatchMatchStereo.window_radius", "5",  # Default 11, halved for speed
+                "--PatchMatchStereo.num_iterations", "3",  # Default 5, reduced for speed
+            ])
+
+        await self._run_command(command, "COLMAP PatchMatchStereo failed")
+
+    async def _run_colmap_stereo_fusion(self) -> Path:
+        """Run COLMAP stereo fusion to create dense point cloud.
+        Returns path to fused.ply.
+        """
+        fused_ply_path = self.distorted_dir / "fused.ply"
+
+        command = [
+            self.colmap_bin,
+            "stereo_fusion",
+            "--workspace_path", str(self.distorted_dir),
+            "--workspace_format", "COLMAP",
+            "--input_type", "geometric",
+            "--output_path", str(fused_ply_path),
+            "--StereoFusion.min_num_pixels", "3",
+            "--StereoFusion.max_reproj_error", "2.0",
+        ]
+
+        await self._run_command(command, "COLMAP stereo fusion failed")
+
+        if not fused_ply_path.exists():
+            raise Exception("Stereo fusion completed but fused.ply not found")
+
+        print(f"[MVS] Fused PLY: {fused_ply_path} ({fused_ply_path.stat().st_size} bytes)")
+        return fused_ply_path
 
     async def _run_gaussian_splatting(self) -> AsyncGenerator[float, None]:
         """
@@ -289,10 +341,7 @@ class GaussianSplattingPipeline:
 
     async def _run_gs_original(self) -> AsyncGenerator[float, None]:
         """Run original 3DGS implementation with optimized settings"""
-
-        # Convert COLMAP format to 3DGS input format
         print(f"[3DGS] Starting _run_gs_original")
-        await self._convert_colmap_to_gs_format()
 
         # Training command for original 3DGS
         train_script = Path(self.gaussian_splatting_path) / "train.py"
@@ -311,12 +360,11 @@ class GaussianSplattingPipeline:
             "--disable_viewer",
         ]
 
-        # Add fast mode optimizations
-        if self.fast_mode:
-            command.extend([
-                "--densify_until_iter", str(min(1500, max_iterations - 100)),
-                "--densification_interval", "200",  # Less frequent densification
-            ])
+        # Densification settings (less aggressive with dense MVS initialization)
+        command.extend([
+            "--densify_until_iter", str(min(3500, max_iterations - 100)),
+            "--densification_interval", "200",
+        ])
 
         # Run training with progress monitoring
         print(f"[3DGS] Running command: {' '.join(command)}")
@@ -414,6 +462,80 @@ class GaussianSplattingPipeline:
             progress = (step / total_steps) * 100
             yield progress
 
+    def _replace_sparse_with_dense(self, fused_ply_path: Path, max_points: int = 50000) -> int:
+        """Replace sparse points3D with dense MVS cloud for 3DGS initialization.
+
+        Reads COLMAP's fused.ply, downsamples to max_points, and writes
+        points3D.ply in the format 3DGS's fetchPly() expects.
+        3DGS checks for points3D.ply before points3D.bin, so no 3DGS code changes needed.
+
+        Returns number of points written.
+        """
+        ply_data = PlyData.read(str(fused_ply_path))
+        vertices = ply_data['vertex']
+        num_points = len(vertices)
+        print(f"[MVS] Dense cloud has {num_points} points")
+
+        if num_points == 0:
+            print("[MVS] WARNING: Dense cloud is empty, keeping sparse initialization")
+            return 0
+
+        # Extract arrays
+        xyz = np.column_stack([
+            np.array(vertices['x'], dtype=np.float32),
+            np.array(vertices['y'], dtype=np.float32),
+            np.array(vertices['z'], dtype=np.float32),
+        ])
+        rgb = np.column_stack([
+            np.array(vertices['red'], dtype=np.uint8),
+            np.array(vertices['green'], dtype=np.uint8),
+            np.array(vertices['blue'], dtype=np.uint8),
+        ])
+
+        if 'nx' in vertices.dtype.names:
+            normals = np.column_stack([
+                np.array(vertices['nx'], dtype=np.float32),
+                np.array(vertices['ny'], dtype=np.float32),
+                np.array(vertices['nz'], dtype=np.float32),
+            ])
+        else:
+            normals = np.zeros_like(xyz)
+
+        # Downsample if too many points (prevents VRAM overflow on 6GB GPU)
+        if num_points > max_points:
+            print(f"[MVS] Downsampling from {num_points} to {max_points} points")
+            indices = np.random.choice(num_points, max_points, replace=False)
+            xyz = xyz[indices]
+            rgb = rgb[indices]
+            normals = normals[indices]
+            num_points = max_points
+
+        # Write points3D.ply in storePly format (matches 3DGS's fetchPly expectations)
+        gs_sparse_0 = self.distorted_dir / "sparse" / "0"
+        gs_sparse_0.mkdir(parents=True, exist_ok=True)
+        output_ply_path = gs_sparse_0 / "points3D.ply"
+
+        dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                 ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
+                 ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')]
+
+        elements = np.empty(num_points, dtype=dtype)
+        elements['x'] = xyz[:, 0]
+        elements['y'] = xyz[:, 1]
+        elements['z'] = xyz[:, 2]
+        elements['nx'] = normals[:, 0]
+        elements['ny'] = normals[:, 1]
+        elements['nz'] = normals[:, 2]
+        elements['red'] = rgb[:, 0]
+        elements['green'] = rgb[:, 1]
+        elements['blue'] = rgb[:, 2]
+
+        vertex_element = PlyElement.describe(elements, 'vertex')
+        PlyData([vertex_element]).write(str(output_ply_path))
+
+        print(f"[MVS] Dense initialization written: {output_ply_path} ({num_points} points)")
+        return num_points
+
     async def _convert_colmap_to_gs_format(self):
         """Convert COLMAP undistorted output to 3DGS input format.
 
@@ -454,6 +576,9 @@ class GaussianSplattingPipeline:
             output_ply = self.output_dir / "model.ply"
             shutil.copy2(ply_files[0], output_ply)
 
+            # Create MeshLab-compatible PLY with standard (x,y,z,r,g,b) properties
+            self._export_standard_ply(output_ply, self.output_dir / "model_meshlab.ply")
+
             # Create a simple GLTF reference for compatibility
             # Note: For true 3DGS viewing, frontend should use a splat viewer
             gltf_data = {
@@ -484,6 +609,76 @@ class GaussianSplattingPipeline:
 
             with open(self.output_dir / "model.gltf", "w") as f:
                 json.dump(gltf_data, f, indent=2)
+
+    def _export_standard_ply(self, input_ply: Path, output_ply: Path):
+        """Convert 3DGS PLY (with SH coefficients) to standard PLY (x,y,z,r,g,b) for MeshLab"""
+        try:
+            with open(input_ply, "rb") as f:
+                data = f.read()
+
+            # Parse header
+            header_end = data.index(b"end_header\n") + len(b"end_header\n")
+            header_text = data[:header_end].decode("ascii")
+            lines = header_text.strip().split("\n")
+
+            vertex_count = 0
+            properties = []
+            for line in lines:
+                parts = line.strip().split()
+                if parts[0] == "element" and parts[1] == "vertex":
+                    vertex_count = int(parts[2])
+                elif parts[0] == "property":
+                    properties.append(parts[2])  # property name
+
+            if vertex_count == 0:
+                print("[Export] No vertices found in PLY")
+                return
+
+            prop_index = {name: i for i, name in enumerate(properties)}
+            bytes_per_vertex = len(properties) * 4  # all float32
+            body = data[header_end:]
+
+            C0 = 0.28209479177387814
+            has_sh = "f_dc_0" in prop_index
+
+            # Write standard PLY
+            with open(output_ply, "wb") as out:
+                header = (
+                    f"ply\n"
+                    f"format binary_little_endian 1.0\n"
+                    f"element vertex {vertex_count}\n"
+                    f"property float x\n"
+                    f"property float y\n"
+                    f"property float z\n"
+                    f"property uchar red\n"
+                    f"property uchar green\n"
+                    f"property uchar blue\n"
+                    f"end_header\n"
+                )
+                out.write(header.encode("ascii"))
+
+                for i in range(vertex_count):
+                    offset = i * bytes_per_vertex
+                    x = struct.unpack_from("<f", body, offset + prop_index["x"] * 4)[0]
+                    y = struct.unpack_from("<f", body, offset + prop_index["y"] * 4)[0]
+                    z = struct.unpack_from("<f", body, offset + prop_index["z"] * 4)[0]
+
+                    if has_sh:
+                        sh0 = struct.unpack_from("<f", body, offset + prop_index["f_dc_0"] * 4)[0]
+                        sh1 = struct.unpack_from("<f", body, offset + prop_index["f_dc_1"] * 4)[0]
+                        sh2 = struct.unpack_from("<f", body, offset + prop_index["f_dc_2"] * 4)[0]
+                        r = int(max(0, min(255, (sh0 * C0 + 0.5) * 255)))
+                        g = int(max(0, min(255, (sh1 * C0 + 0.5) * 255)))
+                        b = int(max(0, min(255, (sh2 * C0 + 0.5) * 255)))
+                    else:
+                        r, g, b = 128, 128, 128
+
+                    out.write(struct.pack("<fff", x, y, z))
+                    out.write(struct.pack("BBB", r, g, b))
+
+            print(f"[Export] Standard PLY written: {output_ply} ({vertex_count} vertices)")
+        except Exception as e:
+            print(f"[Export] Failed to create standard PLY: {e}")
 
     def _check_gpu(self) -> bool:
         """Check if GPU is available for COLMAP"""

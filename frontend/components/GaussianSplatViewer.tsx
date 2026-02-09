@@ -191,6 +191,10 @@ export default function GaussianSplatViewer({ splatUrl, downloadUrl }: GaussianS
         controls.target.copy(center);
         controls.enableDamping = true;
         controls.dampingFactor = 0.1;
+        controls.enableZoom = true;
+        controls.zoomSpeed = 1.2;
+        controls.minDistance = radius * 0.1;
+        controls.maxDistance = radius * 10;
         controls.update();
 
         setLoading(false);
@@ -286,7 +290,7 @@ export default function GaussianSplatViewer({ splatUrl, downloadUrl }: GaussianS
             onClick={handleDownload}
             className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white font-bold py-4 px-12 rounded-lg text-lg transition duration-200 shadow-lg"
           >
-            Download PLY Model
+            Download PLY (MeshLab Compatible)
           </button>
         </div>
       </div>

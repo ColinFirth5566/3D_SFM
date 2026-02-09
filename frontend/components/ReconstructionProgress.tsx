@@ -82,23 +82,27 @@ export default function ReconstructionProgress({
           </div>
         </div>
 
-        {/* Stage descriptions */}
+        {/* Stage descriptions matching MVS-enhanced pipeline */}
         <div className="space-y-3 text-sm text-gray-300">
-          <div className={`flex items-center ${progress >= 0 ? 'text-white' : ''}`}>
-            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 0 ? 'bg-blue-500' : 'bg-gray-600'}`}></div>
-            <span>Feature extraction and matching</span>
+          <div className={`flex items-center ${progress >= 5 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 5 ? 'bg-green-500' : progress >= 0 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+            <span>Feature extraction &amp; matching</span>
           </div>
-          <div className={`flex items-center ${progress >= 33 ? 'text-white' : ''}`}>
-            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 33 ? 'bg-blue-500' : 'bg-gray-600'}`}></div>
-            <span>Structure from motion</span>
+          <div className={`flex items-center ${progress >= 25 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 35 ? 'bg-green-500' : progress >= 25 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+            <span>Structure from Motion (camera poses)</span>
           </div>
-          <div className={`flex items-center ${progress >= 66 ? 'text-white' : ''}`}>
-            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 66 ? 'bg-blue-500' : 'bg-gray-600'}`}></div>
-            <span>Dense reconstruction</span>
+          <div className={`flex items-center ${progress >= 38 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 60 ? 'bg-green-500' : progress >= 38 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+            <span>Multi-View Stereo dense reconstruction</span>
           </div>
-          <div className={`flex items-center ${progress >= 90 ? 'text-white' : ''}`}>
-            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 90 ? 'bg-blue-500' : 'bg-gray-600'}`}></div>
-            <span>Generating 3D model</span>
+          <div className={`flex items-center ${progress >= 63 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 95 ? 'bg-green-500' : progress >= 63 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+            <span>3D Gaussian Splatting training</span>
+          </div>
+          <div className={`flex items-center ${progress >= 95 ? 'text-white' : ''}`}>
+            <div className={`w-2 h-2 rounded-full mr-3 ${progress >= 100 ? 'bg-green-500' : progress >= 95 ? 'bg-blue-500 animate-pulse' : 'bg-gray-600'}`}></div>
+            <span>Model export</span>
           </div>
         </div>
 

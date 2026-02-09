@@ -7,4 +7,5 @@ export const API_ENDPOINTS = {
   status: (jobId: string) => `${API_URL}/api/status/${jobId}`,
   download: (jobId: string) => `${API_URL}/api/download/${jobId}`,
   downloadSplat: (jobId: string) => `${API_URL}/api/download/${jobId}/splat`,
+  downloadPly: (jobId: string) => `${API_URL}/api/download/${jobId}/ply`,
 };

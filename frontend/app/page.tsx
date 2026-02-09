@@ -19,7 +19,7 @@ export default function Home() {
 
   const handleReconstructionComplete = (completedJobId: string) => {
     setSplatUrl(API_ENDPOINTS.downloadSplat(completedJobId));
-    setDownloadUrl(API_ENDPOINTS.downloadSplat(completedJobId));
+    setDownloadUrl(API_ENDPOINTS.downloadPly(completedJobId));
     setStatus('complete');
   };
 

@@ -49,7 +49,7 @@ The project is split into two main components:
 
 ### Backend (`/backend`)
 - **Framework**: FastAPI (Python)
-- **Reconstruction**: 3D Gaussian Splatting with Open3D and COLMAP CLI for camera pose estimation.
+- **Reconstruction**: COLMAP (SfM + MVS) for dense point cloud, 3D Gaussian Splatting for final model
 - **Key Files**:
   - `main.py` - FastAPI application with REST endpoints and CORS configuration
   - `models.py` - Pydantic models for request/response validation
@@ -67,22 +67,27 @@ The project is split into two main components:
 6. When complete, frontend displays 3D model from `/api/download/{job_id}`
 
 ### Reconstruction Pipeline (reconstruction.py)
-The 3D Gaussian Splatting pipeline with the following stages:
-1. **Image Preparation** (0-5%) - Resize and optimize input images (800px max in fast mode)
-2. **COLMAP Feature Extraction** (5-20%) - SIFT feature detection (4096 features in fast mode)
-3. **COLMAP Feature Matching** (20-35%) - Sequential matching for <=20 images (faster than exhaustive)
-4. **COLMAP Mapper** (35-50%) - Structure from Motion, camera pose estimation
-5. **COLMAP Undistortion** (50-55%) - Undistort images for training
-6. **3DGS Training** (55-95%) - Train gaussian splat representation (2000 iterations in fast mode)
-7. **Model Export** (95-100%) - Export to PLY format for web viewer
+The MVS-enhanced 3D Gaussian Splatting pipeline with the following stages:
+1. **Image Preparation** (0-5%) - Resize and optimize input images (1000px max in fast mode)
+2. **COLMAP Feature Extraction** (5-15%) - SIFT feature detection (8192 features)
+3. **COLMAP Feature Matching** (15-25%) - Exhaustive matching for robust results
+4. **COLMAP Mapper** (25-35%) - Structure from Motion, camera pose estimation
+5. **COLMAP Undistortion** (35-38%) - Undistort images for MVS and training
+6. **COLMAP PatchMatch MVS** (38-55%) - Dense depth map computation
+7. **COLMAP Stereo Fusion** (55-60%) - Fuse depth maps into dense point cloud
+8. **Dense Initialization** (60-63%) - Replace sparse points with dense MVS cloud for 3DGS
+9. **3DGS Training** (63-95%) - Train gaussian splat representation (5000 iterations in fast mode)
+10. **Model Export** (95-100%) - Export PLY + MeshLab-compatible PLY for web viewer
 
 ### Speed Optimizations (Fast Mode)
-The pipeline includes a fast mode enabled by default for <5 minute processing with 12 images:
-- **Image Resizing**: Downscales images to 800px max dimension
-- **Reduced SIFT Features**: 4096 features instead of 8192
-- **Sequential Matching**: Uses sequential matcher instead of exhaustive for <=20 images
-- **Reduced 3DGS Iterations**: 2000 iterations instead of 7000
-- **Optimized Densification**: Less frequent densification intervals
+The pipeline includes a fast mode (default) targeting <5 minute total processing for 12 images:
+- **Image Resizing**: Downscales images to 1000px max dimension
+- **Full SIFT Features**: 8192 features for reliable matching
+- **Exhaustive Matching**: Robust matching regardless of image capture order
+- **PatchMatch MVS Speed**: window_radius=5, num_iterations=3 (vs defaults 11/5)
+- **Dense MVS Initialization**: Up to 50k points from fused cloud for better 3DGS convergence
+- **Reduced 3DGS Iterations**: 5000 iterations (dense init converges faster)
+- **Optimized Densification**: Less aggressive with dense MVS starting point
 
 ## Development Commands
 
@@ -189,8 +194,10 @@ GS_IMPLEMENTATION=simulation
 - API uses CORS to allow frontend (localhost:3000) to access backend (localhost:8000)
 - Jobs are stored in-memory; implement database for production (Phase 1)
 - Uploaded files and outputs are not cleaned up automatically; add cleanup logic
-- Fast mode processing: ~3-5 minutes for 12 images with GPU
-- Quality mode (fast_mode=False): 10-30 minutes for full resolution
+- Fast mode processing: <5 minutes for 12 images with GPU (COLMAP SfM + MVS + 3DGS)
+- Quality mode (fast_mode=False): 10-30 minutes for full resolution at 1920px
 - For optimal results, ensure images have 70%+ overlap between adjacent views
-- COLMAP handles camera pose estimation; 3DGS handles the reconstruction
-- Frontend uses @mkkellogg/gaussian-splats-3d for native 3DGS PLY rendering
+- COLMAP handles camera pose estimation and MVS dense reconstruction; 3DGS handles the final rendering
+- MVS dense cloud provides much better 3DGS initialization than sparse SfM points alone
+- Frontend uses custom Three.js point cloud renderer with 3DGS SH-to-RGB color conversion
+- Download endpoint provides MeshLab-compatible PLY (standard x,y,z,r,g,b format)
